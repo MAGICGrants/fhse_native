@@ -1,0 +1,11 @@
+# The same width as wallet-core, which binds to this package.
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - windows/**
+    - macos/**
+    - linux/**
+formatter:
+  page_width: 100

@@ -1,0 +1,4 @@
+<!-- No `package` attribute: AGP 8 takes the namespace from build.gradle. The
+     library needs no permissions; wallet_fhse declares NFC and USB host for the
+     security keys. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>

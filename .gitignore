@@ -1,0 +1,7 @@
+# CMake output: the Android build (externalNativeBuild) and host builds.
+android/.cxx/
+build/
+
+# Dart / Flutter. A package's lock is its consumers' business.
+.dart_tool/
+pubspec.lock

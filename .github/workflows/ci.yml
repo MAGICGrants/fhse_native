@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build
+        run: |
+          cmake -S src -B build/host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/host -j4
+
+      # The 19 wfhse_* functions of src/wfhse.h and nothing else: FHSE,
+      # libcbor and libsodium stay internal to the library.
+      - name: Only the wfhse_* interface is exported
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            nm -gU build/host/libfhse_native.dylib | awk '{print $3}' | sed 's/^_//' > exports.txt
+          else
+            nm -D --defined-only build/host/libfhse_native.so | awk '{print $3}' > exports.txt
+          fi
+          cat exports.txt
+          [ "$(grep -c '^wfhse_' exports.txt)" -eq 19 ]
+          ! grep -v '^wfhse_' exports.txt
+
+  apple-forwarders:
+    name: Apple forwarding files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: |
+          sh tool/generate_ios_classes.sh
+          git diff --exit-code -- ios/Classes macos/Classes
+          test -z "$(git status --porcelain -- ios/Classes macos/Classes)"

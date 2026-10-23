@@ -1,0 +1,6 @@
+# Third-party sources copied from upstream, and the forwarding files
+# tool/generate_ios_classes.sh writes: GitHub collapses their diffs and leaves
+# them out of the language statistics.
+src/vendor/** linguist-vendored linguist-generated
+ios/Classes/** linguist-generated
+macos/Classes/** linguist-generated

@@ -1,0 +1,29 @@
+name: fhse_native
+description: "vtnerd's FHSE (FIDO2 hmac-secret encryption) with libcbor and libsodium, built for Android, iOS, macOS, Linux and Windows behind the small C interface in src/wfhse.h. The native half of wallet-core's wallet_fhse."
+publish_to: "none"
+version: 0.1.0
+repository: https://github.com/MAGICGrants/fhse_native
+
+environment:
+  sdk: 3.13.5
+  flutter: 3.47.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      # FFI only: each platform builds src/ and the app opens the result
+      # (lib/fhse_native.dart). Nothing registers with Flutter.
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
