@@ -1,7 +1,5 @@
 // The Android Gradle Plugin builds the library with the Android NDK, from the
-// CMake build shared with the other platforms (../src/CMakeLists.txt). No NDK
-// is named here, so AGP's default applies, as for the other plugins the apps
-// build.
+// CMake build shared with the other platforms (../src/CMakeLists.txt).
 
 group = "org.magicgrants.fhse_native"
 version = "1.0"
@@ -32,6 +30,15 @@ android {
     }
 
     compileSdk = 36
+
+    // The NDK the app pins (its android/app/build.gradle) rather than AGP's
+    // default, so release and F-Droid builds compile this library with the NDK
+    // they install. Flutter's root android/build.gradle evaluates :app before
+    // the plugins; without an app (or an NDK it names), AGP's default applies.
+    def appNdk = rootProject.findProject(":app")?.extensions?.findByName("android")?.ndkVersion
+    if (appNdk) {
+        ndkVersion = appNdk
+    }
 
     externalNativeBuild {
         cmake {

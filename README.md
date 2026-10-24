@@ -40,7 +40,8 @@ fhse_native:
   Re-run that script after changing anything under `src/`.
 - `linux/` and `windows/`: the FFI plugin builds of `src/` (MSVC on
   Windows; `src/CMakeLists.txt` has its settings).
-- `android/`: the Android Gradle Plugin builds `src/` with the NDK.
+- `android/`: the Android Gradle Plugin builds `src/` with the NDK the app
+  pins.
 
 ## Building for the host
 
@@ -63,4 +64,7 @@ version above. Then bump the commit wallet_fhse pins.
 
 F-Droid rebuilds the apps' Android library from these sources and compares it
 with the release. Nothing here embeds a build time, and the build reads nothing
-from the network.
+from the network. The library builds with the NDK the app pins
+(`android/build.gradle`), and its debug info names the source, build and NDK
+directories relatively (`src/CMakeLists.txt`), so the build ID the linker
+hashes from it is the same wherever those are.

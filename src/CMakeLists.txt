@@ -16,6 +16,20 @@ set(VENDOR "${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
+if(NOT MSVC)
+  # Reproducible builds: debug info records where the sources, the build
+  # directory and the NDK's toolchain are, and the build ID the linker hashes
+  # from it stays in the stripped library. Recorded by relative names instead,
+  # the library is the same wherever it is built. The last matching map wins,
+  # so a build directory inside src/ still maps to build.
+  add_compile_options(
+    "-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=src"
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build")
+  if(ANDROID)
+    add_compile_options("-ffile-prefix-map=${ANDROID_TOOLCHAIN_ROOT}=ndk")
+  endif()
+endif()
+
 if(MSVC)
   # Control Flow Guard: an indirect call may only reach a real function entry
   # point. The library links with it too, below.
