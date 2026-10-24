@@ -38,6 +38,28 @@ jobs:
           [ "$(grep -c '^wfhse_' exports.txt)" -eq 19 ]
           ! grep -v '^wfhse_' exports.txt
 
+  android-reproducible:
+    name: Android library is reproducible
+    runs-on: ubuntu-latest
+    env:
+      # The NDK the apps pin (their android/app/build.gradle ndkVersion), and
+      # the CMake the Android Gradle Plugin uses when none is named.
+      NDK_VERSION: 28.1.13356709
+      CMAKE_VERSION: 3.22.1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install the NDK and CMake
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+      # The second build uses the runner's own CMake, another version.
+      - name: Two builds of each ABI are identical
+        run: |
+          runner_cmake=$(command -v cmake)
+          sdk_cmake="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin"
+          PATH="$sdk_cmake:$PATH" CMAKE="$sdk_cmake/cmake" CMAKE_B="$runner_cmake" \
+            tool/check_reproducible.sh "$ANDROID_HOME/ndk/$NDK_VERSION"
+
   apple-forwarders:
     name: Apple forwarding files are current
     runs-on: ubuntu-latest

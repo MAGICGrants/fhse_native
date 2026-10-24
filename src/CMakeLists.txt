@@ -20,13 +20,22 @@ if(NOT MSVC)
   # Reproducible builds: debug info records where the sources, the build
   # directory and the NDK's toolchain are, and the build ID the linker hashes
   # from it stays in the stripped library. Recorded by relative names instead,
-  # the library is the same wherever it is built. The last matching map wins,
+  # the library is the same wherever it is built. Each directory is mapped by
+  # the path CMake has for it and by its real path: when a symlink leads there
+  # (a symlinked pub cache, macOS's /tmp), the compiler records its working
+  # directory, the build directory, by the latter. The last matching map wins,
   # so a build directory inside src/ still maps to build.
-  add_compile_options(
-    "-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=src"
-    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build")
+  function(wfhse_map_prefix dir name)
+    get_filename_component(real "${dir}" REALPATH)
+    add_compile_options("-ffile-prefix-map=${dir}=${name}")
+    if(NOT real STREQUAL dir)
+      add_compile_options("-ffile-prefix-map=${real}=${name}")
+    endif()
+  endfunction()
+  wfhse_map_prefix("${CMAKE_CURRENT_SOURCE_DIR}" src)
+  wfhse_map_prefix("${CMAKE_BINARY_DIR}" build)
   if(ANDROID)
-    add_compile_options("-ffile-prefix-map=${ANDROID_TOOLCHAIN_ROOT}=ndk")
+    wfhse_map_prefix("${ANDROID_TOOLCHAIN_ROOT}" ndk)
   endif()
 endif()
 

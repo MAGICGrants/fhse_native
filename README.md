@@ -68,3 +68,14 @@ from the network. The library builds with the NDK the app pins
 (`android/build.gradle`), and its debug info names the source, build and NDK
 directories relatively (`src/CMakeLists.txt`), so the build ID the linker
 hashes from it is the same wherever those are.
+
+`tool/check_reproducible.sh <ndk-dir>` checks this, and CI runs it: it builds
+each ABI the apps ship twice, the second time from other directories, through
+symlinks, with another CMake if `CMAKE_B` names one, and in another time zone
+and locale, and fails unless the two libraries are identical and name no
+absolute path. It prints the hash of each stripped library, the file that goes
+into the APK, for comparing builds on different machines. Those must run the
+same operating system: the NDK's startup objects for Linux and for macOS name
+different builds of its compiler, so the two libraries differ in that note
+(`.comment`) and in the build ID hashed from it, though not in code or data.
+Release and F-Droid builds both run on Linux.
