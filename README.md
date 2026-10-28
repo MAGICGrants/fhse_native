@@ -31,7 +31,8 @@ fhse_native:
     itself.
   - libcbor 0.13.0, with its two CMake-generated headers written by hand.
   - libsodium 1.0.22 stable, without its assembly and build files.
-- `src/wfhse.{h,c}`: the C interface Dart binds to. Only these 19 functions
+- `src/wfhse.{h,c}`: the C interface Dart binds to (wallet_fhse, and
+  wallet_backup for libsodium's XChaCha20-Poly1305). Only these 21 functions
   are exported.
 - `src/CMakeLists.txt`: the Android, Linux and Windows builds, and host
   builds. The defines follow libsodium's own `build.zig`.

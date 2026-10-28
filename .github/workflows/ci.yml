@@ -25,7 +25,7 @@ jobs:
           cmake -S src -B build/host -DCMAKE_BUILD_TYPE=Release
           cmake --build build/host -j4
 
-      # The 19 wfhse_* functions of src/wfhse.h and nothing else: FHSE,
+      # The 21 wfhse_* functions of src/wfhse.h and nothing else: FHSE,
       # libcbor and libsodium stay internal to the library.
       - name: Only the wfhse_* interface is exported
         run: |
@@ -35,7 +35,7 @@ jobs:
             nm -D --defined-only build/host/libfhse_native.so | awk '{print $3}' > exports.txt
           fi
           cat exports.txt
-          [ "$(grep -c '^wfhse_' exports.txt)" -eq 19 ]
+          [ "$(grep -c '^wfhse_' exports.txt)" -eq 21 ]
           ! grep -v '^wfhse_' exports.txt
 
   android-reproducible:

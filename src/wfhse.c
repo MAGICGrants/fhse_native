@@ -21,6 +21,7 @@
 #endif
 
 #include <sodium/core.h>
+#include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_kdf_blake2b.h>
 #include <sodium/randombytes.h>
@@ -178,6 +179,42 @@ int wfhse_hash_personal(const uint8_t* message, size_t message_len, const uint8_
   memcpy(pers, personal, personal_len);
   const int rc = crypto_generichash_blake2b_salt_personal(out, out_len, message, message_len, NULL, 0, salt, pers);
   return rc == 0 ? fhse_success : fhse_crypto_failure;
+}
+
+static int aead_arguments(const uint8_t* out, const uint8_t* in, size_t in_len, const uint8_t* ad, size_t ad_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* key, size_t key_len)
+{
+  if (!out || (!in && in_len) || (!ad && ad_len) || !nonce || !key)
+    return fhse_bad_argument;
+  if (nonce_len != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES || key_len != crypto_aead_xchacha20poly1305_ietf_KEYBYTES)
+    return fhse_bad_argument;
+  return wfhse_init() == fhse_success ? fhse_success : fhse_crypto_failure;
+}
+
+int wfhse_xchacha20poly1305_encrypt(uint8_t* out, size_t out_len, const uint8_t* in, size_t in_len, const uint8_t* ad, size_t ad_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* key, size_t key_len)
+{
+  if (in_len > crypto_aead_xchacha20poly1305_ietf_MESSAGEBYTES_MAX || out_len != in_len + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+    return fhse_bad_argument;
+  const int rc = aead_arguments(out, in, in_len, ad, ad_len, nonce, nonce_len, key, key_len);
+  if (rc != fhse_success)
+    return rc;
+  unsigned long long written = 0;
+  if (crypto_aead_xchacha20poly1305_ietf_encrypt(out, &written, in, in_len, ad, ad_len, NULL, nonce, key) != 0)
+    return fhse_crypto_failure;
+  return written == out_len ? fhse_success : fhse_crypto_failure;
+}
+
+int wfhse_xchacha20poly1305_decrypt(uint8_t* out, size_t out_len, const uint8_t* in, size_t in_len, const uint8_t* ad, size_t ad_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* key, size_t key_len)
+{
+  if (in_len < crypto_aead_xchacha20poly1305_ietf_ABYTES || out_len != in_len - crypto_aead_xchacha20poly1305_ietf_ABYTES)
+    return fhse_bad_argument;
+  const int rc = aead_arguments(out, in, in_len, ad, ad_len, nonce, nonce_len, key, key_len);
+  if (rc != fhse_success)
+    return rc;
+  unsigned long long written = 0;
+  // libsodium checks the tag before it decrypts, and zeroes `out` on a mismatch.
+  if (crypto_aead_xchacha20poly1305_ietf_decrypt(out, &written, NULL, in, in_len, ad, ad_len, nonce, key) != 0)
+    return fhse_decryption_failure;
+  return written == out_len ? fhse_success : fhse_crypto_failure;
 }
 
 int wfhse_random(uint8_t* out, size_t out_len)

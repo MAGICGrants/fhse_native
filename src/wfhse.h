@@ -1,10 +1,12 @@
-// The C interface the Dart side of wallet_fhse binds to by hand.
+// The C interface the Dart sides of wallet_fhse and wallet_backup bind to by
+// hand.
 //
 // A thin layer over FHSE's own API (vendor/fhse/include/fhse.h), so the only
-// symbols this library exports are these. It adds three things FHSE leaves to
-// its caller: flat pointer+length arguments that are easy to pass through
+// symbols this library exports are these. It adds what FHSE leaves to its
+// caller: flat pointer+length arguments that are easy to pass through
 // dart:ffi, copies of FHSE-owned output into buffers Dart frees with
-// `wfhse_free`, and the two libsodium hashes the wallet's key tree uses.
+// `wfhse_free`, the two libsodium hashes the wallet's key tree uses, and
+// libsodium's XChaCha20-Poly1305, which seals wallet_backup's files.
 //
 // Every function returning int returns an `enum fhse_error` value (0 is
 // success) or one of the WFHSE_* codes below.
@@ -66,6 +68,17 @@ WFHSE_EXPORT int wfhse_kdf(const uint8_t* key, size_t key_len, const uint8_t* co
 //! Unkeyed BLAKE2b-256 of `message` with a personalisation of at most 16
 //! bytes (zero-padded) and a zero salt.
 WFHSE_EXPORT int wfhse_hash_personal(const uint8_t* message, size_t message_len, const uint8_t* personal, size_t personal_len, uint8_t* out, size_t out_len);
+
+//! libsodium crypto_aead_xchacha20poly1305_ietf_encrypt: a 32-byte key and a
+//! 24-byte nonce. `out` receives the ciphertext followed by the 16-byte tag,
+//! so `out_len` must be `in_len + 16`.
+WFHSE_EXPORT int wfhse_xchacha20poly1305_encrypt(uint8_t* out, size_t out_len, const uint8_t* in, size_t in_len, const uint8_t* ad, size_t ad_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* key, size_t key_len);
+
+//! libsodium crypto_aead_xchacha20poly1305_ietf_decrypt, the inverse: `in` is
+//! the ciphertext followed by the tag, and `out_len` must be `in_len - 16`.
+//! fhse_decryption_failure, with `out` zeroed, if the tag does not match the
+//! key, nonce, `ad` and ciphertext.
+WFHSE_EXPORT int wfhse_xchacha20poly1305_decrypt(uint8_t* out, size_t out_len, const uint8_t* in, size_t in_len, const uint8_t* ad, size_t ad_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* key, size_t key_len);
 
 WFHSE_EXPORT int wfhse_random(uint8_t* out, size_t out_len);
 
