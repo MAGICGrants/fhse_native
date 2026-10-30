@@ -22,10 +22,12 @@ fhse_native:
 - `src/vendor/`: third-party sources, copied unmodified except as noted. GitHub
   collapses them in diffs (`.gitattributes`).
   - FHSE, from [MAGICGrants/fhse](https://github.com/MAGICGrants/fhse) (a fork
-    of vtnerd/fhse) at `d58f2e7`: vtnerd's `35b32c6` plus fixes (32-byte KDF
+    of vtnerd/fhse) at `8364cf5`: vtnerd's `35b32c6` plus fixes (32-byte KDF
     input, atomic open, PIN handling and a credProtect check in `device.c` that
     reads the key's own answer from its authenticator data, CBOR counts and the
-    key length bounded before anything is allocated). `src/`, `include/` and
+    key length bounded before anything is allocated), and then a change that
+    reports a failed lock as `fhse_mlock_failure` rather than
+    `fhse_bad_alloc`, in the AEAD, CBOR and libfido2 paths. `src/`, `include/` and
     `LICENSE` only, without its CMake files. `device.c` is not compiled here (no
     `FHSE_LIBFIDO2`); each of wallet_fhse's platform backends checks credProtect
     itself.
@@ -33,7 +35,10 @@ fhse_native:
   - libsodium 1.0.22 stable, without its assembly and build files.
 - `src/wfhse.{h,c}`: the C interface Dart binds to (wallet_fhse, and
   wallet_backup for libsodium's XChaCha20-Poly1305). Only these 21 functions
-  are exported.
+  are exported. `wfhse.c` also gives FHSE its memory: blocks locked once and
+  kept locked, rather than FHSE's default of locking each secret on its own,
+  which needs more pages than Android lets an app lock on 16 KB-page phones.
+- `test/locked_memory_test.c`: tests those blocks and FHSE's flows on them.
 - `src/CMakeLists.txt`: the Android, Linux and Windows builds, and host
   builds. The defines follow libsodium's own `build.zig`.
 - `ios/` and `macos/`: the CocoaPods builds of the same sources, through
@@ -54,6 +59,13 @@ cmake --build build/host -j8
 This gives `build/host/libfhse_native.{dylib,so}`. wallet_fhse's tests build and
 load the same thing from its pub cache copy of this package
 (`tool/build_host_library.dart` there).
+
+The test of the locked blocks builds with the same CMake project:
+
+```sh
+cmake -S src -B build/test -DWFHSE_BUILD_TESTS=ON
+cmake --build build/test -j8 && build/test/wfhse_test
+```
 
 ## Changing the vendored sources
 

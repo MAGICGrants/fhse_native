@@ -48,8 +48,8 @@ int fhse_sbytes_pack(fhse_sbytes_t* self, fhse_cbor_t* out, fhse_memory_t const*
   if (!self->length)
     return fhse_success;
 
-  if (out->remaining < self->length && fhse_cbor_increase_capacity(out, self->length, memory) != fhse_success)
-    return fhse_bad_alloc;
+  if (out->remaining < self->length)
+    FHSE_TRY(fhse_cbor_increase_capacity(out, self->length, memory));
 ;
   memmove(out->write_ptr, self->data, self->length);
   if (!fhse_cbor_increment(out, self->length, memory))
@@ -77,8 +77,7 @@ int fhse_sbytes_unpack(fhse_sbytes_t* self, cbor_item_t* src, fhse_memory_t cons
 
   if (ptr && length)
   {
-    if (fhse_sbytes_realloc(self, length, memory) != fhse_success)
-      return fhse_bad_alloc;
+    FHSE_TRY(fhse_sbytes_realloc(self, length, memory));
     memcpy(self->data, ptr, length);
   }
   return fhse_success;

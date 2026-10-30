@@ -63,7 +63,7 @@ size_t fhse_cbor_increment(fhse_cbor_t* self, size_t more, fhse_memory_t const* 
   {
     size_t next_length = self->payload.length ?
       self->payload.length : FHSE_CBOR_BUFFER_DEFAULT;
-    fhse_cbor_increase_capacity(self, next_length, memory);
+    self->error = fhse_cbor_increase_capacity(self, next_length, memory);
     return 0;
   }
   self->write_ptr += more;
@@ -82,8 +82,8 @@ int fhse_cbor_field(fhse_cbor_t* self, const char* name, fhse_memory_t const* me
   if (rc != fhse_success)
     return rc;
 
-  if (length && self->remaining < length && fhse_cbor_increase_capacity(self, length, memory) != fhse_success)
-    return fhse_bad_alloc;
+  if (length && self->remaining < length)
+    FHSE_TRY(fhse_cbor_increase_capacity(self, length, memory));
 
   memmove(self->write_ptr, name, length);
   fhse_cbor_increment(self, length, memory);

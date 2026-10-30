@@ -172,10 +172,12 @@
     if (fhse_bytes_from_string(&state->name, FHSE_CRYPTO_AEAD_NAME, memory) != fhse_success)
       return fhse_bad_alloc;
 
-    if (fhse_sbytes_realloc(out, state->payload.length + FHSE_CRYPTO_AEAD_TAG_SIZE, memory) != fhse_success)
+    // fhse_mlock_failure as well as fhse_bad_alloc: the caller needs to know which.
+    int rc = fhse_sbytes_realloc(out, state->payload.length + FHSE_CRYPTO_AEAD_TAG_SIZE, memory);
+    if (rc != fhse_success)
     {
       fhse_bytes_free(&state->name, memory);
-      return fhse_bad_alloc;
+      return rc;
     }
 
     if (fhse_bytes_realloc(&state->nonce, FHSE_CRYPTO_AEAD_NONCE_SIZE, memory) != fhse_success)
@@ -188,7 +190,7 @@
     randombytes_buf(state->nonce.data, state->nonce.length);
 
     unsigned long long out_length = 0;
-    const int rc = crypto_aead_xchacha20poly1305_ietf_encrypt(
+    rc = crypto_aead_xchacha20poly1305_ietf_encrypt(
       out->data, &out_length, state->payload.data, state->payload.length, NULL, 0, NULL, state->nonce.data, key.data
     );
 
@@ -216,11 +218,12 @@
     if (sodium_init() == -1)
       return fhse_crypto_failure;
 
-    if (fhse_sbytes_realloc(out, state->payload.length - FHSE_CRYPTO_AEAD_TAG_SIZE, memory) != fhse_success)
-      return fhse_bad_alloc;
+    int rc = fhse_sbytes_realloc(out, state->payload.length - FHSE_CRYPTO_AEAD_TAG_SIZE, memory);
+    if (rc != fhse_success)
+      return rc;
 
     unsigned long long length = out->length;
-    const int rc = crypto_aead_xchacha20poly1305_ietf_decrypt(
+    rc = crypto_aead_xchacha20poly1305_ietf_decrypt(
       out->data, &length, NULL, state->payload.data, state->payload.length, NULL, 0, state->nonce.data, key.data
     );
 

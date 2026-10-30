@@ -204,3 +204,13 @@ elseif(UNIX AND NOT APPLE)
   # Linux: the GOT read-only after load, and no executable stack.
   target_link_options(fhse_native PRIVATE "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack")
 endif()
+
+# ----- tests (off by default): test/locked_memory_test.c -----
+
+option(WFHSE_BUILD_TESTS "Build wfhse_test" OFF)
+if(WFHSE_BUILD_TESTS)
+  add_executable(wfhse_test "${CMAKE_CURRENT_SOURCE_DIR}/../test/locked_memory_test.c")
+  target_include_directories(wfhse_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(wfhse_test PRIVATE wfhse_fhse)
+  set_target_properties(wfhse_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+endif()

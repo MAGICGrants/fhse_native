@@ -206,11 +206,12 @@ int fhse_device_generate_cred_excluding(fhse_device_t* self, fhse_sbytes_t* out,
       rc = FIDO_ERR_UNSUPPORTED_EXTENSION;
   }
 
+  int rc2 = fhse_success;
   if (rc == FIDO_ERR_SUCCESS)
   {
     size_t length = fido_cred_id_len(cred);
     unsigned char const* const ptr = fido_cred_id_ptr(cred);
-    int rc2 = fhse_sbytes_realloc(out, length, &self->memory);
+    rc2 = fhse_sbytes_realloc(out, length, &self->memory);
     if (ptr && length && rc2 == fhse_success)
       memcpy(out->data, ptr, out->length);
     else
@@ -218,7 +219,8 @@ int fhse_device_generate_cred_excluding(fhse_device_t* self, fhse_sbytes_t* out,
   }
  
   fido_cred_free(&cred);
-  return convert_rc(rc);
+  // A buffer that could not be allocated or locked is not the key's doing.
+  return rc2 != fhse_success ? rc2 : convert_rc(rc);
 }
 
 int fhse_device_get_hmac_secret(fhse_device_t* self, fhse_sbytes_t* out, fhse_cviews_t keys, fhse_cview_t salt, const char* pin)
@@ -247,10 +249,11 @@ int fhse_device_get_hmac_secret(fhse_device_t* self, fhse_sbytes_t* out, fhse_cv
   if (rc == FIDO_ERR_SUCCESS && !(fido_assert_flags(ass, 0) & FHSE_FIDO_FLAG_UV))
     rc = FIDO_ERR_PIN_REQUIRED;
 
+  int rc2 = fhse_success;
   if (rc == FIDO_ERR_SUCCESS)
   {
     size_t length = fido_assert_hmac_secret_len(ass, 0);
-    int rc2 = fhse_sbytes_realloc(out, length, &self->memory);
+    rc2 = fhse_sbytes_realloc(out, length, &self->memory);
     unsigned char const* const ptr = fido_assert_hmac_secret_ptr(ass, 0);
     if (ptr && length && rc2 == fhse_success)
       memcpy(out->data, ptr, out->length);
@@ -259,7 +262,7 @@ int fhse_device_get_hmac_secret(fhse_device_t* self, fhse_sbytes_t* out, fhse_cv
   }
 
   fido_assert_free(&ass);
-  return convert_rc(rc);
+  return rc2 != fhse_success ? rc2 : convert_rc(rc);
 }
 
 int fhse_device_cancel(fhse_device_t* self)

@@ -111,7 +111,7 @@
       if (fhse_cbor_increment(out, __VA_ARGS__, memory)) \
         break;                                           \
     if (try == 3)                                        \
-      rc = fhse_bad_alloc;                               \
+      rc = (out)->error ? (out)->error : fhse_bad_alloc; \
   } while (0)
 
 #define FHSE_CBOR_WRITE(...) \
@@ -123,6 +123,7 @@ struct fhse_cbor_t
   fhse_sbytes_t payload;
   uint8_t* write_ptr;
   size_t remaining;
+  int error; //!< why `payload` last failed to grow (fhse_mlock_failure, say)
 };
 
 int fhse_cbor_increase_capacity(fhse_cbor_t* self, size_t more, fhse_memory_t const* memory);

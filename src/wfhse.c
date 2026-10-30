@@ -9,8 +9,11 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <pthread.h>
 #endif
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -27,11 +30,328 @@
 #include <sodium/randombytes.h>
 #include <sodium/utils.h>
 
+#include "fhse/memory.h"
+
 static fhse_cview_t cview(const uint8_t* data, size_t length)
 {
   fhse_cview_t out = {.data = data, .length = length};
   return out;
 }
+
+// ----- FHSE's memory: locked blocks -----
+//
+// FHSE's default memory functions lock each secret buffer on its own. Each
+// allocator size class then sits on a page of its own, so setting a key up
+// needs 5 locked pages, while Android lets an app lock 64 KiB: 4 pages on a
+// 16 KB-page phone. Locks do not stack on Linux or Windows either, so freeing
+// one buffer unlocked a page that other secrets still used. Instead, every
+// FHSE allocation comes from blocks that are locked once, when made, and stay
+// locked while the process runs. FHSE's mlock and munlock only check that a
+// buffer lies in a block, so a secret still never sits in unlocked memory, and
+// a block that cannot be locked is not used. One 16 KiB block holds what FHSE
+// needs with up to 7 keys; more keys add blocks (3 for 20 keys, 5 for 50).
+// FHSE's non-secret buffers come from the same blocks, as it has one allocator
+// for both.
+//
+// When no block can be locked (the process has used up its RLIMIT_MEMLOCK),
+// an allocation comes from the heap instead, as with FHSE's defaults. FHSE
+// locks each secret buffer before writing to it, and memory_lock refuses one
+// on the heap, so FHSE reports fhse_mlock_failure and frees it unused; only
+// non-secret buffers stay on the heap.
+//
+// Build with WFHSE_SYSTEM_ALLOCATOR to use FHSE's default instead, so that
+// AddressSanitizer sees each buffer.
+
+#if !defined(WFHSE_SYSTEM_ALLOCATOR)
+
+#define WFHSE_BLOCK_SIZE (16 * 1024)
+
+// Each allocation follows one of these, inside its block. Sizes are multiples
+// of it, so every allocation is 16-byte aligned on 32-bit targets as well.
+typedef union wfhse_chunk
+{
+  struct
+  {
+    size_t size; // bytes after the header
+    size_t used;
+  } h;
+  unsigned char align[16];
+} wfhse_chunk;
+
+typedef struct wfhse_block
+{
+  struct wfhse_block* next;
+  unsigned char* data;
+  size_t size;
+} wfhse_block;
+
+static wfhse_block* blocks;
+
+#if defined(_WIN32)
+static SRWLOCK blocks_mutex = SRWLOCK_INIT;
+static void blocks_acquire(void) { AcquireSRWLockExclusive(&blocks_mutex); }
+static void blocks_release(void) { ReleaseSRWLockExclusive(&blocks_mutex); }
+#else
+static pthread_mutex_t blocks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void blocks_acquire(void) { pthread_mutex_lock(&blocks_mutex); }
+static void blocks_release(void) { pthread_mutex_unlock(&blocks_mutex); }
+#endif
+
+// Appends a locked block with room for `size` bytes after a header.
+static wfhse_block* block_new(size_t size)
+{
+  if (SIZE_MAX - 2 * WFHSE_BLOCK_SIZE < size)
+    return NULL;
+  // sodium_malloc gives the block pages of its own, between guard pages and
+  // out of core dumps. Its 16-byte canary sits just before the data, so a
+  // multiple of WFHSE_BLOCK_SIZE less 16 fills whole pages and keeps the data
+  // 16-byte aligned.
+  const size_t length = (size + sizeof(wfhse_chunk) + 16 + WFHSE_BLOCK_SIZE - 1) / WFHSE_BLOCK_SIZE * WFHSE_BLOCK_SIZE - 16;
+  wfhse_block* block = malloc(sizeof(wfhse_block));
+  if (!block)
+    return NULL;
+  block->next = NULL;
+  block->data = sodium_malloc(length);
+  // sodium_malloc counts a failed lock as no error, so lock again and check.
+  // Pages already locked take nothing more from Linux's RLIMIT_MEMLOCK.
+  if (!block->data || ((uintptr_t)block->data % sizeof(wfhse_chunk)) != 0 || sodium_mlock(block->data, length) != 0)
+  {
+    if (block->data)
+      sodium_free(block->data);
+    free(block);
+    return NULL;
+  }
+  block->size = length;
+  wfhse_chunk* first = (wfhse_chunk*)block->data;
+  first->h.size = length - sizeof(wfhse_chunk);
+  first->h.used = 0;
+
+  wfhse_block** last = &blocks;
+  while (*last)
+    last = &(*last)->next;
+  *last = block;
+  return block;
+}
+
+// First fit, merging free neighbours on the way.
+static void* block_alloc(wfhse_block* block, size_t size)
+{
+  unsigned char* const end = block->data + block->size;
+  for (unsigned char* p = block->data; p < end; p += sizeof(wfhse_chunk) + ((wfhse_chunk*)p)->h.size)
+  {
+    wfhse_chunk* chunk = (wfhse_chunk*)p;
+    if (chunk->h.used)
+      continue;
+    for (unsigned char* next = p + sizeof(wfhse_chunk) + chunk->h.size; next < end && !((wfhse_chunk*)next)->h.used;)
+    {
+      chunk->h.size += sizeof(wfhse_chunk) + ((wfhse_chunk*)next)->h.size;
+      next = p + sizeof(wfhse_chunk) + chunk->h.size;
+    }
+    if (chunk->h.size < size)
+      continue;
+    if (2 * sizeof(wfhse_chunk) <= chunk->h.size - size)
+    {
+      wfhse_chunk* rest = (wfhse_chunk*)(p + sizeof(wfhse_chunk) + size);
+      rest->h.size = chunk->h.size - size - sizeof(wfhse_chunk);
+      rest->h.used = 0;
+      chunk->h.size = size;
+    }
+    chunk->h.used = 1;
+    return chunk + 1;
+  }
+  return NULL;
+}
+
+// The header of the allocation at `ptr`, or NULL if no block has one there.
+static wfhse_chunk* chunk_of(const void* ptr)
+{
+  const uintptr_t at = (uintptr_t)ptr;
+  for (wfhse_block* block = blocks; block; block = block->next)
+  {
+    const uintptr_t start = (uintptr_t)block->data;
+    if (at < start || start + block->size <= at)
+      continue;
+    for (unsigned char* p = block->data; p < block->data + block->size; p += sizeof(wfhse_chunk) + ((wfhse_chunk*)p)->h.size)
+    {
+      if ((uintptr_t)(p + sizeof(wfhse_chunk)) == at)
+        return ((wfhse_chunk*)p)->h.used ? (wfhse_chunk*)p : NULL;
+    }
+    return NULL;
+  }
+  return NULL;
+}
+
+static void chunk_free(wfhse_chunk* chunk)
+{
+  sodium_memzero(chunk + 1, chunk->h.size);
+  chunk->h.used = 0;
+}
+
+// An allocation on the heap, which no block could take.
+typedef union wfhse_spill
+{
+  struct
+  {
+    union wfhse_spill* next;
+    size_t size; // bytes after the header
+  } h;
+  unsigned char align[16];
+} wfhse_spill;
+
+static wfhse_spill* spills;
+
+static void* spill_new(size_t size)
+{
+  if (SIZE_MAX - sizeof(wfhse_spill) < size)
+    return NULL;
+  wfhse_spill* spill = malloc(sizeof(wfhse_spill) + size);
+  if (!spill)
+    return NULL;
+  spill->h.next = spills;
+  spill->h.size = size;
+  spills = spill;
+  return spill + 1;
+}
+
+// The header of the heap allocation at `ptr`, or NULL if there is none.
+static wfhse_spill* spill_of(const void* ptr)
+{
+  for (wfhse_spill* spill = spills; spill; spill = spill->h.next)
+  {
+    if ((const void*)(spill + 1) == ptr)
+      return spill;
+  }
+  return NULL;
+}
+
+static void spill_free(wfhse_spill* spill)
+{
+  wfhse_spill** link = &spills;
+  while (*link != spill)
+    link = &(*link)->h.next;
+  *link = spill->h.next;
+  sodium_memzero(spill + 1, spill->h.size);
+  free(spill);
+}
+
+static void* chunk_realloc(void* ptr, size_t size)
+{
+  wfhse_chunk* old = NULL;
+  wfhse_spill* spilled = NULL;
+  if (ptr && !(old = chunk_of(ptr)) && !(spilled = spill_of(ptr)))
+    return NULL;
+  if (old && size <= old->h.size)
+  {
+    if (2 * sizeof(wfhse_chunk) <= old->h.size - size)
+    {
+      wfhse_chunk* rest = (wfhse_chunk*)((unsigned char*)ptr + size);
+      rest->h.size = old->h.size - size - sizeof(wfhse_chunk);
+      rest->h.used = 1;
+      old->h.size = size;
+      chunk_free(rest);
+    }
+    return ptr;
+  }
+  if (spilled && size <= spilled->h.size)
+    return ptr;
+
+  void* out = NULL;
+  for (wfhse_block* block = blocks; block && !out; block = block->next)
+    out = block_alloc(block, size);
+  if (!out)
+  {
+    wfhse_block* block = block_new(size);
+    if (block)
+      out = block_alloc(block, size);
+  }
+  if (!out)
+    out = spill_new(size);
+  if (out && old)
+  {
+    memcpy(out, ptr, old->h.size);
+    chunk_free(old);
+  }
+  else if (out && spilled)
+  {
+    memcpy(out, ptr, spilled->h.size);
+    spill_free(spilled);
+  }
+  return out;
+}
+
+static void* memory_realloc(void* ptr, size_t size, void* context)
+{
+  (void)context;
+  if (SIZE_MAX - 2 * WFHSE_BLOCK_SIZE < size)
+    return NULL;
+  // Rounded up to whole headers; zero bytes still get an allocation, as from
+  // sodium_malloc.
+  size = size ? (size + sizeof(wfhse_chunk) - 1) / sizeof(wfhse_chunk) * sizeof(wfhse_chunk) : sizeof(wfhse_chunk);
+  blocks_acquire();
+  void* out = chunk_realloc(ptr, size);
+  blocks_release();
+  return out;
+}
+
+static void memory_free(void* ptr, void* context)
+{
+  (void)context;
+  if (!ptr)
+    return;
+  blocks_acquire();
+  wfhse_chunk* chunk = chunk_of(ptr);
+  wfhse_spill* spill = chunk ? NULL : spill_of(ptr);
+  if (chunk)
+    chunk_free(chunk);
+  else if (spill)
+    spill_free(spill);
+  blocks_release();
+}
+
+// The blocks are locked already: a buffer only has to lie inside one. One on
+// the heap is refused.
+static int memory_lock(void* ptr, size_t length, void* context)
+{
+  (void)context;
+  int rc = fhse_mlock_failure;
+  const uintptr_t at = (uintptr_t)ptr;
+  blocks_acquire();
+  for (wfhse_block* block = blocks; block; block = block->next)
+  {
+    const uintptr_t start = (uintptr_t)block->data;
+    if (start <= at && length <= block->size && at - start <= block->size - length)
+    {
+      rc = fhse_success;
+      break;
+    }
+  }
+  blocks_release();
+  return rc;
+}
+
+// FHSE has wiped the buffer; its block stays locked for the rest.
+static int memory_unlock(void* ptr, size_t length, void* context)
+{
+  return memory_lock(ptr, length, context);
+}
+
+static void memory_zero(void* ptr, size_t length, void* context)
+{
+  (void)context;
+  if (ptr)
+    sodium_memzero(ptr, length);
+}
+
+static const fhse_memory_t locked_memory = {
+  .context = NULL,
+  .realloc = memory_realloc,
+  .free = memory_free,
+  .mlock = memory_lock,
+  .munlock = memory_unlock,
+  .memzero = memory_zero,
+};
+
+#endif // !WFHSE_SYSTEM_ALLOCATOR
 
 int wfhse_init(void)
 {
@@ -42,8 +362,13 @@ fhse_secret_t* wfhse_secret_new(void)
 {
   if (wfhse_init() != fhse_success)
     return NULL;
+#if defined(WFHSE_SYSTEM_ALLOCATOR)
+  const fhse_memory_t* memory = NULL;
+#else
+  const fhse_memory_t* memory = &locked_memory;
+#endif
   fhse_secret_t* self = NULL;
-  if (fhse_secret_construct(&self, NULL, NULL) != fhse_success)
+  if (fhse_secret_construct(&self, memory, NULL) != fhse_success)
     return NULL;
   return self;
 }
